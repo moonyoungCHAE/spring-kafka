@@ -39,6 +39,7 @@ import org.springframework.util.StringUtils;
 public final class EmbeddedKafkaBrokerFactory {
 
 	private static final String TRANSACTION_STATE_LOG_REPLICATION_FACTOR = "transaction.state.log.replication.factor";
+	private static final Integer MIN_REPLICATION_FACTOR = 3;
 
 	/**
 	 * Create an {@link EmbeddedKafkaBroker} based on the {@code EmbeddedKafka} annotation.
@@ -57,8 +58,7 @@ public final class EmbeddedKafkaBrokerFactory {
 	 */
 	@SuppressWarnings("unchecked")
 	public static EmbeddedKafkaBroker create(EmbeddedKafka embeddedKafka, Function<String, String> propertyResolver) {
-		String[] topics =
-				Arrays.stream(embeddedKafka.topics())
+		String[] topics = Arrays.stream(embeddedKafka.topics())
 						.map(propertyResolver)
 						.toArray(String[]::new);
 
@@ -103,7 +103,7 @@ public final class EmbeddedKafkaBrokerFactory {
 		}
 
 		properties.putIfAbsent(TRANSACTION_STATE_LOG_REPLICATION_FACTOR,
-				String.valueOf(Math.min(3, embeddedKafka.count())));
+				String.valueOf(Math.min(MIN_REPLICATION_FACTOR, embeddedKafka.count())));
 
 		embeddedKafkaBroker.brokerProperties((Map<String, String>) (Map<?, ?>) properties);
 		String bootstrapServersProperty = embeddedKafka.bootstrapServersProperty();
