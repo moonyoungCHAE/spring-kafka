@@ -1644,6 +1644,7 @@ public class KafkaMessageListenerContainer<K, V> // NOSONAR line count
 
 		@Nullable
 		private ConsumerRecords<K, V> doPoll() {
+			System.out.println("## doPoll paused: "+(this.consumer.paused().size() > 0));
 			ConsumerRecords<K, V> records;
 			if (this.isBatchListener && this.subBatchPerPartition) {
 				if (this.batchIterator == null) {
@@ -1704,6 +1705,7 @@ public class KafkaMessageListenerContainer<K, V> // NOSONAR line count
 
 		private synchronized void captureOffsets(ConsumerRecords<K, V> records) {
 			if (this.offsetsInThisBatch != null && records.count() > 0) {
+				System.out.println("## captureOffsets offsetInThisBatch clear");
 				this.offsetsInThisBatch.clear();
 				this.deferredOffsets.clear();
 				records.partitions().forEach(part -> {
@@ -2610,6 +2612,7 @@ public class KafkaMessageListenerContainer<K, V> // NOSONAR line count
 				if (cRecord == null) {
 					continue;
 				}
+				System.out.println("## doInvokeWithRecords offset: "+ cRecord.offset());
 				this.logger.trace(() -> "Processing " + KafkaUtils.format(cRecord));
 				doInvokeRecordListener(cRecord, iterator);
 				if (this.commonRecordInterceptor !=  null) {
@@ -2788,6 +2791,7 @@ public class KafkaMessageListenerContainer<K, V> // NOSONAR line count
 					throw e;
 				}
 				try {
+					System.out.println("## invokeErrorHandler");
 					invokeErrorHandler(cRecord, iterator, e);
 					commitOffsetsIfNeededAfterHandlingError(cRecord);
 				}
@@ -2943,6 +2947,11 @@ public class KafkaMessageListenerContainer<K, V> // NOSONAR line count
 
 		private void invokeErrorHandler(final ConsumerRecord<K, V> cRecord,
 				Iterator<ConsumerRecord<K, V>> iterator, RuntimeException rte) {
+			if (this.offsetsInThisBatch == null || this.offsetsInThisBatch.get(new TopicPartition("asaah", 0)) == null) {
+				System.out.println("## invokeErrorHandler start, offsetsInThisBatch null");
+			} else {
+				System.out.println("## invokeErrorHandler start, offsetsInThisBatch "+this.offsetsInThisBatch.get(new TopicPartition("asaah", 0)).size());
+			}
 
 			if (this.commonErrorHandler.seeksAfterHandling() || rte instanceof CommitFailedException) {
 				try {

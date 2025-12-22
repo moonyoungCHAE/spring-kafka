@@ -86,6 +86,7 @@ public class AsyncAckAfterHandleTests {
 		private void accept(final ConsumerRecord<byte[], byte[]> record,
 				final Acknowledgment acknowledgment) {
 			if (record.offset() == 1) {
+				System.out.println("## exception from listener");
 				throw new RuntimeException("Exception for error handler");
 			}
 			else {
