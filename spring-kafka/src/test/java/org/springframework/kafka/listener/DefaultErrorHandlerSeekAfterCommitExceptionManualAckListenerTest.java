@@ -11,17 +11,14 @@ import org.springframework.kafka.annotation.EnableKafka;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.core.*;
+import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.kafka.support.LogIfLevelEnabled;
 import org.springframework.kafka.test.EmbeddedKafkaBroker;
 import org.springframework.kafka.test.context.EmbeddedKafka;
 import org.springframework.kafka.test.utils.KafkaTestUtils;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.junit.jupiter.SpringJUnitConfig;
-import org.springframework.util.backoff.FixedBackOff;
-import reactor.core.publisher.Mono;
-import scala.Int;
 
-import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
@@ -32,26 +29,29 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringJUnitConfig
 @DirtiesContext
-@EmbeddedKafka(topics = "dehm")
-public class DefaultErrorHandlerMonoTest {
+@EmbeddedKafka(topics = "dehma")
+public class DefaultErrorHandlerSeekAfterCommitExceptionManualAckListenerTest {
+	public static Map<Integer, Integer> offsetCountMap =  new ConcurrentHashMap<>();
+
+
 	@Test
-	void testAckAfterHandlerAsync(@Autowired Config config,
-								  @Autowired KafkaTemplate<Integer, String> template)
+	void testErrHandlerMonoListener(@Autowired Config config,
+									@Autowired KafkaTemplate<Integer, String> template)
 			throws InterruptedException {
 
 		for (int i = 0; i < 6; i++) {
-			template.send("dehm", 0, null, "message contents");
+			template.send("dehma", 0, null, "message contents");
 		}
 		assertThat(config.latch.await(10, TimeUnit.SECONDS))
 				.describedAs("CountDownLatch.count=%d", config.latch.getCount())
 				.isTrue();
 
 		for (int i = 0; i < 6; i++) {
-			assertThat(config.offsetCountMap.containsKey(i)).isTrue();
+			assertThat(offsetCountMap.containsKey(i)).isTrue();
 			if (i == 1) {
-				assertThat(config.offsetCountMap.get(1)).isEqualTo(3);
+				assertThat(offsetCountMap.get(1)).isEqualTo(2);
 			} else {
-				assertThat(config.offsetCountMap.get(i)).isEqualTo(1);
+				assertThat(offsetCountMap.get(i)).isEqualTo(1);
 			}
 		}
 
@@ -60,21 +60,37 @@ public class DefaultErrorHandlerMonoTest {
 	@Configuration
 	@EnableKafka
 	public static class Config {
-		private final CountDownLatch latch = new CountDownLatch(8);
-		private final Map<Long, Integer> offsetCountMap = new ConcurrentHashMap<>();
 
-		@KafkaListener(id = "dehm.id", topics = "dehm")
-		public Mono<Void> onTestTopic(ConsumerRecord<byte[], byte[]> record) {
-			long offset = record.offset();
-			System.out.println("## offset"+offset);
-			Integer count = offsetCountMap.getOrDefault(offset, 0);
-			offsetCountMap.put(offset, ++count);
+		private final CountDownLatch latch = new CountDownLatch(7);
+		int exceptionCount = 0;
 
-			this.latch.countDown();
+		@KafkaListener(id = "dehma.id", topics = "dehma")
+		public void onTestTopic(final ConsumerRecord<byte[], byte[]> record,
+								final Acknowledgment acknowledgment) {
+			accept(record, acknowledgment);
+		}
+
+		private void accept(final ConsumerRecord<byte[], byte[]> record,
+							final Acknowledgment acknowledgment) {
+			System.out.println("## listener offset "+record.offset());
+			int offsetCount = offsetCountMap.getOrDefault((int) record.offset(), 0);
+			offsetCount += 1;
+			offsetCountMap.put((int) record.offset(), offsetCount);
+
 			if (record.offset() == 1) {
+				if (exceptionCount == 1) {
+					this.latch.countDown();
+					acknowledgment.acknowledge();
+					return;
+				}
+				System.out.println("## exception from listener");
+				exceptionCount++;
+				this.latch.countDown();
 				throw new RuntimeException("Exception for error handler");
+			} else {
+				this.latch.countDown();
+				acknowledgment.acknowledge();
 			}
-			return Mono.empty();
 		}
 
 		@Bean
@@ -84,14 +100,16 @@ public class DefaultErrorHandlerMonoTest {
 			ConcurrentKafkaListenerContainerFactory<Integer, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
 			factory.setConsumerFactory(consumerFactory);
 			factory.setConcurrency(1);
-			factory.setCommonErrorHandler(new DefaultErrorHandler(new FixedBackOff(1L, 3L)));
+			factory.setCommonErrorHandler(new DefaultErrorHandler());
+			factory.getContainerProperties().setAsyncAcks(true);
+			factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL);
 			factory.getContainerProperties().setCommitLogLevel(LogIfLevelEnabled.Level.TRACE);
 			return factory;
 		}
 
 		@Bean
 		ConsumerFactory<Integer, String> consumerFactory(EmbeddedKafkaBroker broker) {
-			Map<String, Object> props = KafkaTestUtils.consumerProps("dehm.grp", "false", broker);
+			Map<String, Object> props = KafkaTestUtils.consumerProps("dehma.grp", "false", broker);
 			props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 3);
 			return new DefaultKafkaConsumerFactory<>(
 					props);
