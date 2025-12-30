@@ -2102,6 +2102,32 @@ public class KafkaMessageListenerContainer<K, V> // NOSONAR line count
 			}
 		}
 
+		private synchronized void removeOffsetsInBatch(ConsumerRecord<K, V> cRecord) {
+			if (this.offsetsInThisBatch == null || this.deferredOffsets == null) {
+				return;
+			}
+
+			TopicPartition part = new TopicPartition(cRecord.topic(), cRecord.partition());
+			List<Long> offs = this.offsetsInThisBatch.getOrDefault(part, new ArrayList<>());
+			offs.remove(cRecord.offset());
+			if (offs.isEmpty()) {
+				this.deferredOffsets.remove(part);
+				this.offsetsInThisBatch.remove(part);
+				return;
+			} else {
+				this.offsetsInThisBatch.put(part, offs);
+			}
+
+			List<ConsumerRecord<K, V>> deferred = this.deferredOffsets.getOrDefault(part,  new ArrayList<>());
+			deferred.remove(cRecord);
+			if (deferred.isEmpty()) {
+				this.deferredOffsets.remove(part);
+				this.offsetsInThisBatch.remove(part);
+			} else {
+				this.deferredOffsets.put(part, deferred);
+			}
+		}
+
 		private synchronized void ackInOrder(ConsumerRecord<K, V> cRecord) {
 			TopicPartition part = new TopicPartition(cRecord.topic(), cRecord.partition());
 			List<Long> offs = Objects.requireNonNull(this.offsetsInThisBatch).get(part);
@@ -2966,10 +2992,20 @@ public class KafkaMessageListenerContainer<K, V> // NOSONAR line count
 					this.logger.error(ex, "Failed to commit before handling error");
 				}
 				List<ConsumerRecord<?, ?>> records = new ArrayList<>();
+				List<ConsumerRecord<K, V>> record2 = new ArrayList<>();
 				records.add(cRecord);
 				while (iterator.hasNext()) {
-					records.add(iterator.next());
+					ConsumerRecord<K, V> next = iterator.next();
+					records.add(next);
+					record2.add(next);
 				}
+				if (this.offsetsInThisBatch != null) {
+					removeOffsetsInBatch(cRecord);
+					for (ConsumerRecord<K, V> record : record2) {
+						removeOffsetsInBatch(record);
+					}
+				}
+
 				this.commonErrorHandler.handleRemaining(rte, records, this.consumer,
 						KafkaMessageListenerContainer.this.thisOrParentContainer);
 			}
